@@ -3,6 +3,9 @@
 #import <objc/message.h>
 #import <objc/runtime.h>
 
+static void DINLog(NSString *format, ...);
+static void DINDumpObject(id obj, NSString *label);
+
 #pragma mark - Settings
 
 static NSString * const DINDefaultsSuite = @"com.1205417239.dynamiclslandnotify";
