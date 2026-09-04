@@ -603,7 +603,7 @@ static void DINLog(NSString *format, ...) {
                               arguments:args];
     va_end(args);
 
-    NSString *path = @"/var/mobile/DIN_debug.log";
+    NSString *path = @"/tmp/DIN_debug.log";
 
     NSDateFormatter *fmt = [[NSDateFormatter alloc] init];
     [fmt setDateFormat:@"HH:mm:ss"];
@@ -1065,6 +1065,21 @@ DINCreateItemFromRequest(id request) {
 #pragma mark - Constructor
 
 %ctor {
+
+    /*
+     * Minimal load marker: if this file exists after
+     * respring, the dylib was definitely loaded.
+     * Written before anything else to avoid early
+     * failures masking the load event.
+     */
+    @try {
+        [@"DynamicIslandNotify loaded\n"
+            writeToFile:@"/tmp/DIN_loaded.txt"
+             atomically:YES
+               encoding:NSUTF8StringEncoding
+                  error:nil];
+    } @catch (__unused id e) {
+    }
 
     DINLog(@"[DIN] Tweak loaded");
 
