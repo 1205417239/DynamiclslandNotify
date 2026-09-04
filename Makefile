@@ -3,11 +3,11 @@ ARCHS = arm64e
 
 include $(THEOS)/makefiles/common.mk
 
-TWEAK_NAME = DynamiclslandNotify
+TWEAK_NAME = DynamicIslandNotify
 
-DynamiclslandNotify_FILES = Tweak.xm
-DynamiclslandNotify_CFLAGS = -fobjc-arc
-DynamiclslandNotify_FRAMEWORKS = UIKit UserNotifications
+DynamicIslandNotify_FILES = Tweak.xm
+DynamicIslandNotify_CFLAGS = -fobjc-arc
+DynamicIslandNotify_FRAMEWORKS = UIKit UserNotifications
 
 include $(THEOS_MAKE_PATH)/tweak.mk
 
