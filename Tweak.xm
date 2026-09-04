@@ -89,7 +89,7 @@ static BOOL DINEnabled(void) {
      */
     self.window.windowLevel = UIWindowLevelStatusBar + 10;
 
-    NSLog(@"[DIN] Island window created");
+    DINLog(@"[DIN] Island window created");
 
     UIViewController *controller =
         [[UIViewController alloc] init];
@@ -237,7 +237,7 @@ static BOOL DINEnabled(void) {
 
 - (void)enqueueNotification:(DINNotificationItem *)item {
 
-    NSLog(@"[DIN] enqueue title=%@", item.title);
+    DINLog(@"[DIN] enqueue title=%@", item.title);
 
     if (!DINEnabled()) {
         return;
@@ -592,6 +592,106 @@ static BOOL DINEnabled(void) {
 
 #pragma mark - Helpers
 
+static void DINLog(NSString *format, ...) {
+    va_list args;
+    va_start(args, format);
+    NSString *text =
+        [[NSString alloc] initWithFormat:format
+                              arguments:args];
+    va_end(args);
+
+    NSString *path = @"/var/mobile/DIN_debug.log";
+
+    NSDateFormatter *fmt = [[NSDateFormatter alloc] init];
+    [fmt setDateFormat:@"HH:mm:ss"];
+    NSString *timestamp =
+        [fmt stringFromDate:[NSDate date]];
+
+    NSString *line =
+        [NSString stringWithFormat:@"%@ %@\n",
+            timestamp, text];
+
+    NSFileHandle *fh =
+        [NSFileHandle fileHandleForWritingAtPath:path];
+
+    if (!fh) {
+        [[NSFileManager defaultManager]
+            createFileAtPath:path
+                    contents:nil
+                  attributes:nil];
+        fh = [NSFileHandle
+            fileHandleForWritingAtPath:path];
+    }
+
+    if (fh) {
+        [fh seekToEndOfFile];
+        [fh writeData:
+            [line dataUsingEncoding:NSUTF8StringEncoding]];
+        [fh closeFile];
+    }
+}
+
+static void DINDumpObject(id obj, NSString *label) {
+    if (!obj) {
+        DINLog(@"[DUMP] %@ = nil", label);
+        return;
+    }
+
+    DINLog(@"[DUMP] %@ class=%@", label,
+        NSStringFromClass([obj class]));
+    DINLog(@"[DUMP] %@ description=%@", label, obj);
+
+    unsigned int count = 0;
+    objc_property_t *props =
+        class_copyPropertyList([obj class], &count);
+
+    if (count > 0) {
+        DINLog(@"[DUMP] %@ has %u properties:",
+            label, count);
+        for (unsigned int i = 0; i < count; i++) {
+            const char *name =
+                property_getName(props[i]);
+            NSString *key =
+                [NSString stringWithUTF8String:name];
+            @try {
+                id value = [obj valueForKey:key];
+                NSString *valStr =
+                    [value isKindOfClass:NSString.class]
+                        ? value
+                        : [value description];
+                if ([valStr length] > 200) {
+                    valStr =
+                        [[valStr substringToIndex:200]
+                            stringByAppendingString:@"..."];
+                }
+                DINLog(@"[DUMP]   %@.%@ = %@",
+                    label, key, valStr);
+            } @catch (__unused id exception) {
+                DINLog(@"[DUMP]   %@.%@ = <exception>",
+                    label, key);
+            }
+        }
+        free(props);
+    }
+
+    unsigned int methodCount = 0;
+    Method *methods =
+        class_copyMethodList([obj class], &methodCount);
+    if (methodCount > 0) {
+        DINLog(@"[DUMP] %@ has %u methods (first 30):",
+            label, methodCount);
+        unsigned int limit =
+            methodCount > 30 ? 30 : methodCount;
+        for (unsigned int i = 0; i < limit; i++) {
+            SEL sel = method_getName(methods[i]);
+            const char *name = sel_getName(sel);
+            DINLog(@"[DUMP]   -[%@ %s]",
+                label, name);
+        }
+        free(methods);
+    }
+}
+
 static NSString *DINGetString(id object,
                                NSArray *keys) {
 
@@ -626,9 +726,9 @@ DINCreateItemFromRequest(id request) {
         return nil;
     }
 
-    NSLog(@"[DIN] parse: request class=%@",
+    DINLog(@"[DIN] parse: request class=%@",
         NSStringFromClass([request class]));
-    NSLog(@"[DIN] parse: request=%@", request);
+    DINLog(@"[DIN] parse: request=%@", request);
 
     DINNotificationItem *item =
         [[DINNotificationItem alloc] init];
@@ -680,7 +780,7 @@ DINCreateItemFromRequest(id request) {
 
         if (bulletin) {
 
-            NSLog(@"[DIN] parse: publisherBulletin class=%@",
+            DINLog(@"[DIN] parse: publisherBulletin class=%@",
                 NSStringFromClass([bulletin class]));
 
             @try {
@@ -704,7 +804,7 @@ DINCreateItemFromRequest(id request) {
         }
     }
 
-    NSLog(@"[DIN] parse: notification=%@",
+    DINLog(@"[DIN] parse: notification=%@",
         notification ? NSStringFromClass([notification class]) : @"nil");
 
     UNNotificationContent *content = nil;
@@ -736,7 +836,7 @@ DINCreateItemFromRequest(id request) {
         }
     }
 
-    NSLog(@"[DIN] parse: content=%@",
+    DINLog(@"[DIN] parse: content=%@",
         content ? NSStringFromClass([content class]) : @"nil");
 
     if (content) {
@@ -747,7 +847,7 @@ DINCreateItemFromRequest(id request) {
         item.body =
             content.body ?: @"";
 
-        NSLog(@"[DIN] parse: from content title=%@ body=%@",
+        DINLog(@"[DIN] parse: from content title=%@ body=%@",
             item.title, item.body);
 
         /*
@@ -793,7 +893,7 @@ DINCreateItemFromRequest(id request) {
                 ? bundleID
                 : @"";
 
-        NSLog(@"[DIN] parse: bundleID=%@", item.bundleID);
+        DINLog(@"[DIN] parse: bundleID=%@", item.bundleID);
     }
 
     if (!item.title.length) {
@@ -860,17 +960,17 @@ DINCreateItemFromRequest(id request) {
             [NSString stringWithFormat:@"%p", request];
     }
 
-    NSLog(@"[DIN] parse: final title=%@ body=%@ bundleID=%@",
+    DINLog(@"[DIN] parse: final title=%@ body=%@ bundleID=%@",
         item.title, item.body, item.bundleID);
 
     if (!item.title.length &&
         !item.body.length) {
 
-        NSLog(@"[DIN] parse: FAILED, returning nil");
+        DINLog(@"[DIN] parse: FAILED, returning nil");
         return nil;
     }
 
-    NSLog(@"[DIN] parse: SUCCESS");
+    DINLog(@"[DIN] parse: SUCCESS");
     return item;
 }
 
@@ -880,10 +980,19 @@ DINCreateItemFromRequest(id request) {
 
 - (void)presentBannerWithRequest:(id)request {
 
-    NSLog(@"[DIN] Banner Hook fired");
-    NSLog(@"[DIN] request class = %@",
+    DINLog(@"[DIN] Banner Hook fired");
+    DINLog(@"[DIN] request class = %@",
         NSStringFromClass([request class]));
-    NSLog(@"[DIN] request = %@", request);
+    DINLog(@"[DIN] request = %@", request);
+
+    /*
+     * Version A: dump request structure on first trigger.
+     */
+    static BOOL dumped = NO;
+    if (!dumped) {
+        dumped = YES;
+        DINDumpObject(request, @"request");
+    }
 
     /*
      * Disabled = completely preserve normal iOS behavior.
@@ -900,7 +1009,32 @@ DINCreateItemFromRequest(id request) {
 
     if (!item) {
 
-        NSLog(@"[DIN] item is nil, calling orig");
+        DINLog(@"[DIN] item is nil, calling orig");
+
+        /*
+         * Version A: show hardcoded test notification
+         * to verify UI works independently of parsing.
+         */
+        static BOOL testShown = NO;
+        if (!testShown) {
+            testShown = YES;
+            DINNotificationItem *testItem =
+                [[DINNotificationItem alloc] init];
+            testItem.title = @"测试通知";
+            testItem.body = @"看到这个说明UI正常，问题在解析";
+            testItem.bundleID = @"com.apple.springboard";
+            testItem.requestID = @"hardcoded-test";
+
+            DINLog(@"[DIN] showing hardcoded test");
+
+            dispatch_async(
+                dispatch_get_main_queue(),
+                ^{
+                    [[DINIslandController sharedController]
+                        enqueueNotification:testItem];
+                });
+        }
+
         %orig;
 
         return;
@@ -929,7 +1063,7 @@ DINCreateItemFromRequest(id request) {
 
 %ctor {
 
-    NSLog(@"[DIN] Tweak loaded");
+    DINLog(@"[DIN] Tweak loaded");
 
     /*
      * Only inject into SpringBoard.
@@ -955,12 +1089,12 @@ DINCreateItemFromRequest(id request) {
         Method *methods =
             class_copyMethodList(bannerClass, &methodCount);
 
-        NSLog(@"[DIN] SBBannerController found: %u methods",
+        DINLog(@"[DIN] SBBannerController found: %u methods",
             methodCount);
 
         for (unsigned int i = 0; i < methodCount; i++) {
 
-            NSLog(@"[DIN]   -[%@ %@]",
+            DINLog(@"[DIN]   -[%@ %@]",
                 NSStringFromClass(bannerClass),
                 NSStringFromSelector(
                     method_getName(methods[i])));
@@ -970,7 +1104,7 @@ DINCreateItemFromRequest(id request) {
 
     } else {
 
-        NSLog(@"[DIN] SBBannerController class NOT found");
+        DINLog(@"[DIN] SBBannerController class NOT found");
     }
 
     dispatch_async(
