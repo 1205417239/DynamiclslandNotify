@@ -10,6 +10,3 @@ DynamicIslandNotify_CFLAGS = -fobjc-arc
 DynamicIslandNotify_FRAMEWORKS = UIKit UserNotifications
 
 include $(THEOS_MAKE_PATH)/tweak.mk
-
-SUBPROJECTS += DynamiclslandNotifyPrefs
-include $(THEOS_MAKE_PATH)/aggregate.mk
