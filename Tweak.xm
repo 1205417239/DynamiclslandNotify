@@ -87,7 +87,7 @@ static BOOL DINEnabled(void) {
      * This is only the visual overlay.
      * It does not replace Notification Center.
      */
-    self.window.windowLevel = UIWindowLevelAlert + 1000.0;
+    self.window.windowLevel = UIWindowLevelAlert + 1;
 
     UIViewController *controller =
         [[UIViewController alloc] init];
@@ -681,16 +681,30 @@ DINCreateItemFromRequest(id request) {
         item.body =
             content.body ?: @"";
 
-        NSDictionary *userInfo =
-            content.userInfo;
-
+        /*
+         * iOS 17+: prefer sourceBundleIdentifier from request,
+         * since userInfo rarely contains bundleID.
+         */
         NSString *bundleID =
-            userInfo[@"bundleID"];
+            DINGetString(
+                request,
+                @[
+                    @"sourceBundleIdentifier",
+                    @"sectionIdentifier"
+                ]);
 
-        if (![bundleID isKindOfClass:NSString.class]) {
+        if (!bundleID.length) {
 
-            bundleID =
-                userInfo[@"bundleIdentifier"];
+            NSDictionary *userInfo =
+                content.userInfo;
+
+            bundleID = userInfo[@"bundleID"];
+
+            if (![bundleID isKindOfClass:NSString.class]) {
+
+                bundleID =
+                    userInfo[@"bundleIdentifier"];
+            }
         }
 
         item.bundleID =
@@ -750,13 +764,11 @@ DINCreateItemFromRequest(id request) {
 
 #pragma mark - SpringBoard Hook
 
-%hook SBNotificationBannerDestination
+%hook SBBannerController
 
-- (void)_presentNotificationViewController:(id)viewController
-                                     modal:(BOOL)modal
-                                forRequest:(id)request
-                             sourceAction:(id)sourceAction
-                               completion:(id)completion {
+- (void)presentBannerWithRequest:(id)request {
+
+    NSLog(@"[DIN] SBBannerController presentBannerWithRequest: hit");
 
     /*
      * Disabled = completely preserve normal iOS behavior.
@@ -790,17 +802,8 @@ DINCreateItemFromRequest(id request) {
         });
 
     /*
-     * Tell SpringBoard the presentation completed
-     * without displaying the normal Banner.
+     * Do not call %orig to suppress the default Banner.
      */
-    if (completion) {
-
-        void (^completionBlock)(void) =
-            (void (^)(void))completion;
-
-        completionBlock();
-    }
-
     return;
 }
 
