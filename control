@@ -7,4 +7,4 @@ Maintainer: 1205417239
 Author: 1205417239
 Section: Tweaks
 Priority: optional
-Depends: mobilesubstrate
+Depends: mobilesubstrate, preferenceloader
