@@ -8,7 +8,6 @@ TWEAK_NAME = DynamiclslandNotify
 DynamiclslandNotify_FILES = Tweak.xm
 DynamiclslandNotify_CFLAGS = -fobjc-arc
 DynamiclslandNotify_FRAMEWORKS = UIKit UserNotifications
-DynamiclslandNotify_PRIVATE_FRAMEWORKS = SpringBoardServices
 
 include $(THEOS_MAKE_PATH)/tweak.mk
 
