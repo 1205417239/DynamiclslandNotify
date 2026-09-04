@@ -8,7 +8,7 @@ static void DINDumpObject(id obj, NSString *label);
 
 #pragma mark - Settings
 
-static NSString * const DINDefaultsSuite = @"com.1205417239.dynamiclslandnotify";
+static NSString * const DINDefaultsSuite = @"com.1205417239.dynamicislandnotify";
 static NSString * const DINEnabledKey = @"enabled";
 
 static BOOL DINEnabled(void) {
