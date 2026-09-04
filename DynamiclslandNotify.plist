@@ -1,4 +1,7 @@
-Makefile
-README.md
-control
-DynamiclslandNotify.plist
+{
+    Filter = {
+        Bundles = (
+            "com.apple.springboard"
+        );
+    };
+}
