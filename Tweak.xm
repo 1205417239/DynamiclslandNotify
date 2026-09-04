@@ -87,7 +87,9 @@ static BOOL DINEnabled(void) {
      * This is only the visual overlay.
      * It does not replace Notification Center.
      */
-    self.window.windowLevel = UIWindowLevelAlert + 1;
+    self.window.windowLevel = UIWindowLevelStatusBar + 10;
+
+    NSLog(@"[DIN] Island window created");
 
     UIViewController *controller =
         [[UIViewController alloc] init];
@@ -234,6 +236,8 @@ static BOOL DINEnabled(void) {
 #pragma mark - Queue
 
 - (void)enqueueNotification:(DINNotificationItem *)item {
+
+    NSLog(@"[DIN] enqueue title=%@", item.title);
 
     if (!DINEnabled()) {
         return;
@@ -622,6 +626,10 @@ DINCreateItemFromRequest(id request) {
         return nil;
     }
 
+    NSLog(@"[DIN] parse: request class=%@",
+        NSStringFromClass([request class]));
+    NSLog(@"[DIN] parse: request=%@", request);
+
     DINNotificationItem *item =
         [[DINNotificationItem alloc] init];
 
@@ -655,6 +663,50 @@ DINCreateItemFromRequest(id request) {
         }
     }
 
+    /*
+     * iOS 17: try publisherBulletin path.
+     */
+    id bulletin = nil;
+
+    if (!notification) {
+
+        @try {
+
+            bulletin =
+                [request valueForKey:@"publisherBulletin"];
+
+        } @catch (__unused id exception) {
+        }
+
+        if (bulletin) {
+
+            NSLog(@"[DIN] parse: publisherBulletin class=%@",
+                NSStringFromClass([bulletin class]));
+
+            @try {
+
+                notification =
+                    [bulletin valueForKey:@"notification"];
+
+            } @catch (__unused id exception) {
+            }
+
+            if (!notification) {
+
+                @try {
+
+                    notification =
+                        [bulletin valueForKey:@"_notification"];
+
+                } @catch (__unused id exception) {
+                }
+            }
+        }
+    }
+
+    NSLog(@"[DIN] parse: notification=%@",
+        notification ? NSStringFromClass([notification class]) : @"nil");
+
     UNNotificationContent *content = nil;
 
     if ([notification
@@ -673,6 +725,20 @@ DINCreateItemFromRequest(id request) {
                 .content;
     }
 
+    if (!content && bulletin) {
+
+        @try {
+
+            content =
+                [bulletin valueForKey:@"content"];
+
+        } @catch (__unused id exception) {
+        }
+    }
+
+    NSLog(@"[DIN] parse: content=%@",
+        content ? NSStringFromClass([content class]) : @"nil");
+
     if (content) {
 
         item.title =
@@ -680,6 +746,9 @@ DINCreateItemFromRequest(id request) {
 
         item.body =
             content.body ?: @"";
+
+        NSLog(@"[DIN] parse: from content title=%@ body=%@",
+            item.title, item.body);
 
         /*
          * iOS 17+: prefer sourceBundleIdentifier from request,
@@ -692,6 +761,18 @@ DINCreateItemFromRequest(id request) {
                     @"sourceBundleIdentifier",
                     @"sectionIdentifier"
                 ]);
+
+        if (!bundleID.length && bulletin) {
+
+            bundleID =
+                DINGetString(
+                    bulletin,
+                    @[
+                        @"sectionID",
+                        @"sectionIdentifier",
+                        @"bundleID"
+                    ]);
+        }
 
         if (!bundleID.length) {
 
@@ -711,6 +792,8 @@ DINCreateItemFromRequest(id request) {
             [bundleID isKindOfClass:NSString.class]
                 ? bundleID
                 : @"";
+
+        NSLog(@"[DIN] parse: bundleID=%@", item.bundleID);
     }
 
     if (!item.title.length) {
@@ -722,6 +805,18 @@ DINCreateItemFromRequest(id request) {
                     @"title",
                     @"alertTitle"
                 ]);
+
+        if (!item.title.length && bulletin) {
+
+            item.title =
+                DINGetString(
+                    bulletin,
+                    @[
+                        @"title",
+                        @"alertTitle",
+                        @"messageTitle"
+                    ]);
+        }
     }
 
     if (!item.body.length) {
@@ -733,6 +828,18 @@ DINCreateItemFromRequest(id request) {
                     @"body",
                     @"alertBody"
                 ]);
+
+        if (!item.body.length && bulletin) {
+
+            item.body =
+                DINGetString(
+                    bulletin,
+                    @[
+                        @"body",
+                        @"alertBody",
+                        @"message"
+                    ]);
+        }
     }
 
     if (!item.bundleID.length) {
@@ -753,12 +860,17 @@ DINCreateItemFromRequest(id request) {
             [NSString stringWithFormat:@"%p", request];
     }
 
+    NSLog(@"[DIN] parse: final title=%@ body=%@ bundleID=%@",
+        item.title, item.body, item.bundleID);
+
     if (!item.title.length &&
         !item.body.length) {
 
+        NSLog(@"[DIN] parse: FAILED, returning nil");
         return nil;
     }
 
+    NSLog(@"[DIN] parse: SUCCESS");
     return item;
 }
 
@@ -768,7 +880,10 @@ DINCreateItemFromRequest(id request) {
 
 - (void)presentBannerWithRequest:(id)request {
 
-    NSLog(@"[DIN] SBBannerController presentBannerWithRequest: hit");
+    NSLog(@"[DIN] Banner Hook fired");
+    NSLog(@"[DIN] request class = %@",
+        NSStringFromClass([request class]));
+    NSLog(@"[DIN] request = %@", request);
 
     /*
      * Disabled = completely preserve normal iOS behavior.
@@ -785,6 +900,7 @@ DINCreateItemFromRequest(id request) {
 
     if (!item) {
 
+        NSLog(@"[DIN] item is nil, calling orig");
         %orig;
 
         return;
@@ -813,6 +929,8 @@ DINCreateItemFromRequest(id request) {
 
 %ctor {
 
+    NSLog(@"[DIN] Tweak loaded");
+
     /*
      * Only inject into SpringBoard.
      */
@@ -823,6 +941,36 @@ DINCreateItemFromRequest(id request) {
             isEqualToString:@"com.apple.springboard"]) {
 
         return;
+    }
+
+    /*
+     * Dump SBBannerController method list to find
+     * the correct notification presentation selector.
+     */
+    Class bannerClass = objc_getClass("SBBannerController");
+
+    if (bannerClass) {
+
+        unsigned int methodCount = 0;
+        Method *methods =
+            class_copyMethodList(bannerClass, &methodCount);
+
+        NSLog(@"[DIN] SBBannerController found: %u methods",
+            methodCount);
+
+        for (unsigned int i = 0; i < methodCount; i++) {
+
+            NSLog(@"[DIN]   -[%@ %@]",
+                NSStringFromClass(bannerClass),
+                NSStringFromSelector(
+                    method_getName(methods[i])));
+        }
+
+        free(methods);
+
+    } else {
+
+        NSLog(@"[DIN] SBBannerController class NOT found");
     }
 
     dispatch_async(
