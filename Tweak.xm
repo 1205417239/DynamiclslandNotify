@@ -31,9 +31,10 @@
 - (void)setPreferredLayoutMode:(NSInteger)v { _preferredLayoutMode=v; }
 - (NSInteger)minimumSupportedLayoutMode { return -1; }
 - (NSInteger)maximumSupportedLayoutMode { return 2; }
-- (NSInteger)layoutAxis { return -1; }
+- (NSUInteger)layoutAxis { return -1; }
 - (NSInteger)layoutMode { return _layoutMode; }
 - (void)setLayoutMode:(NSInteger)v { _layoutMode=v; }
+- (void)setLayoutMode:(NSInteger)mode reason:(NSInteger)reason { _layoutMode=mode; }
 - (UIEdgeInsets)preferredEdgeOutsetsForLayoutMode:(NSInteger)mode suggestedOutsets:(UIEdgeInsets)suggested maximumOutsets:(UIEdgeInsets)maximum { return suggested; }
 - (BOOL)isMinimalPresentationPossible { return YES; }
 - (void)updateLayout { [_leadingView setNeedsLayout]; [_minimalView setNeedsLayout]; [_trailingView setNeedsLayout]; }
@@ -46,7 +47,7 @@
 - (BOOL)shouldSuppressElementWhileOnCoversheet { return NO; }
 - (BOOL)shouldIgnoreSystemChromeSuppression { return NO; }
 - (BOOL)hasActivityBehavior { return NO; }
-- (void)handleElementViewEvent:(NSInteger)event {}
+- (void)handleElementViewEvent:(NSInteger)a :(NSInteger)b {}
 - (id)clientStorage { return _clientStorage; }
 - (void)setClientStorage:(id)v { _clientStorage=v; }
 - (id)scene { return _scene; }
@@ -67,10 +68,18 @@ static void DXRegisterProtocols(void) {
         "SBSystemApertureStatusBarStyleOverridesRepresenting",
         "SBSystemApertureLayoutCustomizing","SBSystemApertureSuppressible"
     };
+    NSUInteger found=0;
     for (NSUInteger i=0;i<sizeof(names)/sizeof(names[0]);i++) {
         Protocol *p=objc_getProtocol(names[i]);
-        if (p && !class_conformsToProtocol(cls,p)) class_addProtocol(cls,p);
+        if (p) {
+            found++;
+            if (!class_conformsToProtocol(cls,p)) class_addProtocol(cls,p);
+            NSLog(@"[DXCore] protocol found: %s", names[i]);
+        } else {
+            NSLog(@"[DXCore] protocol MISSING: %s", names[i]);
+        }
     }
+    NSLog(@"[DXCore] protocols: %lu/%lu found", (unsigned long)found, (unsigned long)(sizeof(names)/sizeof(names[0])));
 }
 
 static UIView *DXMakeView(NSString *title, NSString *body) {
