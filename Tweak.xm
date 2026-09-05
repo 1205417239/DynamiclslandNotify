@@ -131,9 +131,14 @@ static void DXShowNotification(id request) {
         [element setMinimalView:minimal];
         [element setDetachedMinimalView:minimal];
 
-        id storage=((id(*)(id,SEL,id))objc_msgSend)(
-            controller,sel_registerName("registerElement:"),element);
-        if (storage) [element setClientStorage:storage];
+        SEL registerSel=sel_registerName("registerElement:");
+        if ([controller respondsToSelector:registerSel]) {
+            id storage=((id(*)(id,SEL,id))objc_msgSend)(controller,registerSel,element);
+            if (storage) [element setClientStorage:storage];
+            NSLog(@"[DXCore] registerElement called, storage=%@", storage ? @"yes" : @"nil");
+        } else {
+            NSLog(@"[DXCore] registerElement: NOT FOUND on controller");
+        }
     });
 }
 
