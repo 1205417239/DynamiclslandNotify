@@ -1,10 +1,10 @@
-Package: com.1205417239.dynamicislandnotify
-Name: DynamicIslandNotify
-Version: 0.7.0
+Package: com.1205417239.dynamicislandcore
+Name: DynamicIslandCore
+Version: 0.1.0
 Architecture: iphoneos-arm64
-Description: Redirect SpringBoard notification banners to the Dynamic Island on iPhone 14 Pro Max.
+Description: System Aperture notification experiment for iOS 17.
 Maintainer: 1205417239
 Author: 1205417239
 Section: Tweaks
 Priority: optional
-Depends: mobilesubstrate, preferenceloader
+Depends: mobilesubstrate
