@@ -103,9 +103,12 @@ static UIView *DXMakeView(NSString *title, NSString *body) {
 static void DXShowNotification(id request) {
     dispatch_async(dispatch_get_main_queue(), ^{
         Class c=NSClassFromString(@"SBSystemApertureViewController");
-        if (!c) return;
-        id controller=((id(*)(id,SEL))objc_msgSend)(c,sel_registerName("sharedInstance"));
-        if (!controller) return;
+        if (!c) { NSLog(@"[DXCore] SBSystemApertureViewController class NOT FOUND"); return; }
+        SEL sharedSel=sel_registerName("sharedInstance");
+        if (![c respondsToSelector:sharedSel]) { NSLog(@"[DXCore] sharedInstance NOT FOUND"); return; }
+        id controller=((id(*)(id,SEL))objc_msgSend)(c,sharedSel);
+        if (!controller) { NSLog(@"[DXCore] sharedInstance returned nil"); return; }
+        NSLog(@"[DXCore] got controller: %@", controller);
 
         id content=nil;
         SEL contentSel=sel_registerName("content");
