@@ -1,1137 +1,140 @@
 #import <UIKit/UIKit.h>
-#import <UserNotifications/UserNotifications.h>
+#import <Foundation/Foundation.h>
 #import <objc/message.h>
 #import <objc/runtime.h>
 
-static void DINLog(NSString *format, ...);
-static void DINDumpObject(id obj, NSString *label);
+@interface DXNotificationElement : NSObject {
+    id _clientStorage, _scene, _layoutHost, _elementHost;
+    id _clientIdentifier, _elementIdentifier;
+    UIView *_leadingView, *_trailingView, *_minimalView, *_detachedMinimalView;
+    NSInteger _layoutMode, _preferredLayoutMode;
+    BOOL _suppressed;
+}
+@end
 
-#pragma mark - Settings
+@implementation DXNotificationElement
+- (id)element { return self; }
+- (id)viewProvider { return self; }
+- (id)clientIdentifier { return _clientIdentifier; }
+- (void)setClientIdentifier:(id)v { _clientIdentifier=v; }
+- (id)elementIdentifier { return _elementIdentifier; }
+- (void)setElementIdentifier:(id)v { _elementIdentifier=v; }
+- (UIView *)leadingView { return _leadingView; }
+- (void)setLeadingView:(UIView *)v { _leadingView=v; }
+- (UIView *)trailingView { return _trailingView; }
+- (void)setTrailingView:(UIView *)v { _trailingView=v; }
+- (UIView *)minimalView { return _minimalView ?: _leadingView; }
+- (void)setMinimalView:(UIView *)v { _minimalView=v; }
+- (UIView *)detachedMinimalView { return _detachedMinimalView ?: self.minimalView; }
+- (void)setDetachedMinimalView:(UIView *)v { _detachedMinimalView=v; }
+- (NSInteger)preferredLayoutMode { return _preferredLayoutMode ?: 2; }
+- (void)setPreferredLayoutMode:(NSInteger)v { _preferredLayoutMode=v; }
+- (NSInteger)minimumSupportedLayoutMode { return -1; }
+- (NSInteger)maximumSupportedLayoutMode { return 2; }
+- (NSInteger)layoutAxis { return -1; }
+- (NSInteger)layoutMode { return _layoutMode; }
+- (void)setLayoutMode:(NSInteger)v { _layoutMode=v; }
+- (UIEdgeInsets)preferredEdgeOutsetsForLayoutMode:(NSInteger)mode suggestedOutsets:(UIEdgeInsets)suggested maximumOutsets:(UIEdgeInsets)maximum { return suggested; }
+- (BOOL)isMinimalPresentationPossible { return YES; }
+- (void)updateLayout { [_leadingView setNeedsLayout]; [_minimalView setNeedsLayout]; [_trailingView setNeedsLayout]; }
+- (void)layoutHostContainerViewDidLayoutSubviews:(UIView *)view {}
+- (id)initWithStatusBarStyleOverrides:(NSInteger)v { return [super init]; }
+- (NSInteger)statusBarStyleOverrides { return 0; }
+- (void)setStatusBarStyleOverrides:(NSInteger)v {}
+- (BOOL)acceptsFullScreenTransitionFromSceneWithIdentifier:(id)scene ofBundleId:(id)bundle { return NO; }
+- (BOOL)shouldSuppressElementWhilePresentingAppWithBundleId:(id)bundle { return NO; }
+- (BOOL)shouldSuppressElementWhileOnCoversheet { return NO; }
+- (BOOL)shouldIgnoreSystemChromeSuppression { return NO; }
+- (BOOL)hasActivityBehavior { return NO; }
+- (void)handleElementViewEvent:(NSInteger)event {}
+- (id)clientStorage { return _clientStorage; }
+- (void)setClientStorage:(id)v { _clientStorage=v; }
+- (id)scene { return _scene; }
+- (void)setScene:(id)v { _scene=v; }
+- (id)layoutHost { return _layoutHost; }
+- (void)setLayoutHost:(id)v { _layoutHost=v; }
+- (id)elementHost { return _elementHost; }
+- (void)setElementHost:(id)v { _elementHost=v; }
+- (BOOL)suppressed { return _suppressed; }
+- (void)setSuppressed:(BOOL)v { _suppressed=v; }
+@end
 
-static NSString * const DINDefaultsSuite = @"com.1205417239.dynamicislandnotify";
-static NSString * const DINEnabledKey = @"enabled";
-
-static BOOL DINEnabled(void) {
-    NSUserDefaults *defaults =
-        [[NSUserDefaults alloc] initWithSuiteName:DINDefaultsSuite];
-
-    NSNumber *value = [defaults objectForKey:DINEnabledKey];
-
-    if (!value) {
-        return YES;
+static void DXRegisterProtocols(void) {
+    Class cls=[DXNotificationElement class];
+    const char *names[]={
+        "SAElement","SAElementIdentifying","SAElementViewProviding",
+        "SAUIElementViewProviding","SAUILayoutSpecifying",
+        "SBSystemApertureStatusBarStyleOverridesRepresenting",
+        "SBSystemApertureLayoutCustomizing","SBSystemApertureSuppressible"
+    };
+    for (NSUInteger i=0;i<sizeof(names)/sizeof(names[0]);i++) {
+        Protocol *p=objc_getProtocol(names[i]);
+        if (p && !class_conformsToProtocol(cls,p)) class_addProtocol(cls,p);
     }
-
-    return [value boolValue];
 }
 
-#pragma mark - Notification Item
+static UIView *DXMakeView(NSString *title, NSString *body) {
+    UIView *v=[UIView new];
+    UILabel *l=[UILabel new];
+    l.text=body.length ? [NSString stringWithFormat:@"%@  %@",title ?: @"通知",body] : (title ?: @"通知");
+    l.textColor=UIColor.whiteColor;
+    l.font=[UIFont systemFontOfSize:13 weight:UIFontWeightSemibold];
+    l.numberOfLines=1;
+    [v addSubview:l];
+    l.translatesAutoresizingMaskIntoConstraints=NO;
+    [NSLayoutConstraint activateConstraints:@[
+        [l.leadingAnchor constraintEqualToAnchor:v.leadingAnchor],
+        [l.trailingAnchor constraintEqualToAnchor:v.trailingAnchor],
+        [l.topAnchor constraintEqualToAnchor:v.topAnchor],
+        [l.bottomAnchor constraintEqualToAnchor:v.bottomAnchor]
+    ]];
+    return v;
+}
 
-@interface DINNotificationItem : NSObject
+static void DXShowNotification(id request) {
+    dispatch_async(dispatch_get_main_queue(), ^{
+        Class c=NSClassFromString(@"SBSystemApertureViewController");
+        if (!c) return;
+        id controller=((id(*)(id,SEL))objc_msgSend)(c,sel_registerName("sharedInstance"));
+        if (!controller) return;
 
-@property(nonatomic,copy) NSString *title;
-@property(nonatomic,copy) NSString *body;
-@property(nonatomic,copy) NSString *bundleID;
-@property(nonatomic,copy) NSString *requestID;
+        id content=nil;
+        SEL contentSel=sel_registerName("content");
+        if ([request respondsToSelector:contentSel])
+            content=((id(*)(id,SEL))objc_msgSend)(request,contentSel);
 
-@end
+        NSString *title=nil,*body=nil;
+        if (content) {
+            SEL ts=sel_registerName("title"), bs=sel_registerName("body");
+            if ([content respondsToSelector:ts]) title=((id(*)(id,SEL))objc_msgSend)(content,ts);
+            if ([content respondsToSelector:bs]) body=((id(*)(id,SEL))objc_msgSend)(content,bs);
+        }
 
-@implementation DINNotificationItem
-@end
+        DXNotificationElement *element=[DXNotificationElement new];
+        [element setClientIdentifier:@"com.apple.springboard"];
+        [element setElementIdentifier:[[NSUUID UUID] UUIDString]];
+        [element setLayoutMode:2];
+        [element setPreferredLayoutMode:2];
 
-#pragma mark - Dynamic Island Controller
+        UIView *expanded=DXMakeView(title,body);
+        UIView *minimal=DXMakeView(@"",@"●");
+        [element setLeadingView:expanded];
+        [element setMinimalView:minimal];
+        [element setDetachedMinimalView:minimal];
 
-@interface DINIslandController : NSObject
-
-@property(nonatomic,strong) UIWindow *window;
-@property(nonatomic,strong) UIView *islandView;
-
-@property(nonatomic,strong) UIImageView *iconView;
-@property(nonatomic,strong) UILabel *titleLabel;
-@property(nonatomic,strong) UILabel *bodyLabel;
-
-@property(nonatomic,strong) NSMutableArray *queue;
-
-@property(nonatomic,assign) BOOL showing;
-@property(nonatomic,assign) BOOL expanded;
-
-@property(nonatomic,copy) NSString *currentBundleID;
-
-@end
-
-@implementation DINIslandController
-
-+ (instancetype)sharedController {
-    static DINIslandController *controller;
-    static dispatch_once_t onceToken;
-
-    dispatch_once(&onceToken, ^{
-        controller = [[DINIslandController alloc] init];
+        id storage=((id(*)(id,SEL,id))objc_msgSend)(
+            controller,sel_registerName("registerElement:"),element);
+        if (storage) [element setClientStorage:storage];
     });
-
-    return controller;
 }
 
-#pragma mark - Window
-
-- (void)createWindowIfNeeded {
-
-    if (self.window) {
-        return;
-    }
-
-    UIScreen *screen = [UIScreen mainScreen];
-
-    self.window =
-        [[UIWindow alloc] initWithFrame:screen.bounds];
-
-    self.window.backgroundColor = UIColor.clearColor;
-
-    /*
-     * This is only the visual overlay.
-     * It does not replace Notification Center.
-     */
-    self.window.windowLevel = UIWindowLevelStatusBar + 10;
-
-    DINLog(@"[DIN] Island window created");
-
-    UIViewController *controller =
-        [[UIViewController alloc] init];
-
-    controller.view.backgroundColor =
-        UIColor.clearColor;
-
-    self.window.rootViewController = controller;
-
-    self.window.hidden = NO;
-
-    self.queue = [NSMutableArray array];
-
-    [self createIslandViewInController:controller];
+%hook NCNotificationDispatcher
+- (void)postNotificationWithRequest:(id)request {
+    %orig;
+    DXShowNotification(request);
 }
-
-#pragma mark - Island UI
-
-- (void)createIslandViewInController:(UIViewController *)controller {
-
-    CGFloat screenWidth =
-        UIScreen.mainScreen.bounds.size.width;
-
-    CGFloat width = 126.0;
-    CGFloat height = 37.0;
-
-    self.islandView =
-        [[UIView alloc]
-            initWithFrame:CGRectMake(
-                (screenWidth - width) / 2.0,
-                11.0,
-                width,
-                height)];
-
-    self.islandView.backgroundColor =
-        UIColor.blackColor;
-
-    self.islandView.layer.cornerRadius =
-        height / 2.0;
-
-    self.islandView.clipsToBounds = YES;
-
-    self.islandView.userInteractionEnabled = YES;
-
-    [controller.view addSubview:self.islandView];
-
-    /*
-     * App icon
-     */
-    self.iconView =
-        [[UIImageView alloc]
-            initWithFrame:CGRectMake(
-                8.0,
-                7.0,
-                23.0,
-                23.0)];
-
-    self.iconView.layer.cornerRadius = 6.0;
-    self.iconView.clipsToBounds = YES;
-
-    [self.islandView addSubview:self.iconView];
-
-    /*
-     * Title
-     */
-    self.titleLabel =
-        [[UILabel alloc]
-            initWithFrame:CGRectMake(
-                38.0,
-                4.0,
-                width - 46.0,
-                15.0)];
-
-    self.titleLabel.textColor =
-        UIColor.whiteColor;
-
-    self.titleLabel.font =
-        [UIFont boldSystemFontOfSize:11.5];
-
-    self.titleLabel.numberOfLines = 1;
-
-    self.titleLabel.lineBreakMode =
-        NSLineBreakByTruncatingTail;
-
-    [self.islandView addSubview:self.titleLabel];
-
-    /*
-     * Body
-     */
-    self.bodyLabel =
-        [[UILabel alloc]
-            initWithFrame:CGRectMake(
-                38.0,
-                19.0,
-                width - 46.0,
-                13.0)];
-
-    self.bodyLabel.textColor =
-        [UIColor colorWithWhite:0.82 alpha:1.0];
-
-    self.bodyLabel.font =
-        [UIFont systemFontOfSize:9.5];
-
-    self.bodyLabel.numberOfLines = 1;
-
-    self.bodyLabel.lineBreakMode =
-        NSLineBreakByTruncatingTail;
-
-    [self.islandView addSubview:self.bodyLabel];
-
-    /*
-     * Tap
-     */
-    UITapGestureRecognizer *tap =
-        [[UITapGestureRecognizer alloc]
-            initWithTarget:self
-            action:@selector(handleTap:)];
-
-    [self.islandView addGestureRecognizer:tap];
-
-    /*
-     * Long press
-     */
-    UILongPressGestureRecognizer *longPress =
-        [[UILongPressGestureRecognizer alloc]
-            initWithTarget:self
-            action:@selector(handleLongPress:)];
-
-    longPress.minimumPressDuration = 0.45;
-
-    [self.islandView addGestureRecognizer:longPress];
-
-    /*
-     * Swipe / pan
-     */
-    UIPanGestureRecognizer *pan =
-        [[UIPanGestureRecognizer alloc]
-            initWithTarget:self
-            action:@selector(handlePan:)];
-
-    [self.islandView addGestureRecognizer:pan];
-}
-
-#pragma mark - Queue
-
-- (void)enqueueNotification:(DINNotificationItem *)item {
-
-    DINLog(@"[DIN] enqueue title=%@", item.title);
-
-    if (!DINEnabled()) {
-        return;
-    }
-
-    if (!item) {
-        return;
-    }
-
-    /*
-     * Prevent the same request from being queued repeatedly.
-     */
-    for (DINNotificationItem *oldItem in self.queue) {
-
-        if (oldItem.requestID.length &&
-            item.requestID.length &&
-            [oldItem.requestID
-                isEqualToString:item.requestID]) {
-
-            return;
-        }
-    }
-
-    if (self.showing) {
-
-        [self.queue addObject:item];
-
-        /*
-         * Avoid unlimited queue growth.
-         */
-        if (self.queue.count > 20) {
-            [self.queue removeObjectAtIndex:0];
-        }
-
-        return;
-    }
-
-    [self showNotification:item];
-}
-
-#pragma mark - Show
-
-- (void)showNotification:(DINNotificationItem *)item {
-
-    if (!DINEnabled()) {
-        return;
-    }
-
-    [self createWindowIfNeeded];
-
-    self.currentBundleID = item.bundleID;
-
-    self.titleLabel.text =
-        item.title.length ? item.title : @"通知";
-
-    self.bodyLabel.text =
-        item.body.length ? item.body : @"";
-
-    self.iconView.image =
-        [self applicationIconForBundleID:item.bundleID];
-
-    self.expanded = NO;
-    self.showing = YES;
-
-    UIScreen *screen =
-        [UIScreen mainScreen];
-
-    CGFloat width = 126.0;
-    CGFloat height = 37.0;
-
-    self.islandView.frame =
-        CGRectMake(
-            (screen.bounds.size.width - width) / 2.0,
-            11.0,
-            width,
-            height);
-
-    self.islandView.layer.cornerRadius =
-        height / 2.0;
-
-    self.iconView.frame =
-        CGRectMake(8.0, 7.0, 23.0, 23.0);
-
-    self.titleLabel.frame =
-        CGRectMake(38.0, 4.0, width - 46.0, 15.0);
-
-    self.bodyLabel.frame =
-        CGRectMake(38.0, 19.0, width - 46.0, 13.0);
-
-    self.bodyLabel.numberOfLines = 1;
-    self.bodyLabel.font =
-        [UIFont systemFontOfSize:9.5];
-
-    self.islandView.alpha = 0.0;
-
-    self.islandView.transform =
-        CGAffineTransformMakeScale(0.70, 0.70);
-
-    /*
-     * Spring animation.
-     */
-    [UIView animateWithDuration:0.32
-                          delay:0.0
-         usingSpringWithDamping:0.72
-          initialSpringVelocity:0.9
-                        options:UIViewAnimationOptionCurveEaseOut
-                     animations:^{
-
-        self.islandView.alpha = 1.0;
-
-        self.islandView.transform =
-            CGAffineTransformIdentity;
-
-    } completion:nil];
-
-    /*
-     * Auto collapse after a few seconds.
-     */
-    dispatch_after(
-        dispatch_time(
-            DISPATCH_TIME_NOW,
-            (int64_t)(3.5 * NSEC_PER_SEC)),
-        dispatch_get_main_queue(),
-        ^{
-
-            if (self.showing &&
-                !self.expanded) {
-
-                [self dismissCurrentNotification];
-            }
-        });
-}
-
-#pragma mark - Expand
-
-- (void)expandIsland {
-
-    if (!self.showing ||
-        self.expanded) {
-
-        return;
-    }
-
-    self.expanded = YES;
-
-    UIScreen *screen =
-        [UIScreen mainScreen];
-
-    CGFloat width =
-        MIN(screen.bounds.size.width - 32.0, 390.0);
-
-    CGFloat height = 118.0;
-
-    [UIView animateWithDuration:0.32
-                          delay:0.0
-         usingSpringWithDamping:0.82
-          initialSpringVelocity:0.8
-                        options:UIViewAnimationOptionCurveEaseOut
-                     animations:^{
-
-        self.islandView.frame =
-            CGRectMake(
-                (screen.bounds.size.width - width) / 2.0,
-                8.0,
-                width,
-                height);
-
-        self.islandView.layer.cornerRadius = 28.0;
-
-        self.iconView.frame =
-            CGRectMake(16.0, 16.0, 38.0, 38.0);
-
-        self.titleLabel.frame =
-            CGRectMake(
-                64.0,
-                13.0,
-                width - 82.0,
-                20.0);
-
-        self.bodyLabel.frame =
-            CGRectMake(
-                64.0,
-                38.0,
-                width - 82.0,
-                62.0);
-
-        self.bodyLabel.numberOfLines = 3;
-
-        self.bodyLabel.font =
-            [UIFont systemFontOfSize:14.0];
-
-    } completion:nil];
-}
-
-#pragma mark - Dismiss
-
-- (void)dismissCurrentNotification {
-
-    if (!self.showing) {
-        return;
-    }
-
-    self.showing = NO;
-
-    [UIView animateWithDuration:0.20
-                     animations:^{
-
-        self.islandView.alpha = 0.0;
-
-        self.islandView.transform =
-            CGAffineTransformMakeScale(
-                0.82,
-                0.82);
-
-    } completion:^(BOOL finished) {
-
-        self.islandView.transform =
-            CGAffineTransformIdentity;
-
-        self.islandView.alpha = 1.0;
-
-        self.expanded = NO;
-
-        /*
-         * FIFO queue.
-         */
-        if (self.queue.count > 0) {
-
-            DINNotificationItem *next =
-                self.queue.firstObject;
-
-            [self.queue removeObjectAtIndex:0];
-
-            [self showNotification:next];
-        }
-    }];
-}
-
-#pragma mark - Gestures
-
-- (void)handleTap:(UITapGestureRecognizer *)gesture {
-
-    if (gesture.state !=
-        UIGestureRecognizerStateEnded) {
-
-        return;
-    }
-
-    /*
-     * We intentionally don't call an unverified
-     * private application-launch selector here.
-     *
-     * The notification is dismissed safely.
-     */
-    [self dismissCurrentNotification];
-}
-
-- (void)handleLongPress:(UILongPressGestureRecognizer *)gesture {
-
-    if (gesture.state ==
-        UIGestureRecognizerStateBegan) {
-
-        [self expandIsland];
-    }
-}
-
-- (void)handlePan:(UIPanGestureRecognizer *)gesture {
-
-    if (gesture.state !=
-        UIGestureRecognizerStateEnded) {
-
-        return;
-    }
-
-    CGPoint velocity =
-        [gesture velocityInView:self.islandView];
-
-    /*
-     * Swipe left to close.
-     */
-    if (velocity.x < -250.0) {
-
-        [self dismissCurrentNotification];
-    }
-}
-
-#pragma mark - App Icon
-
-- (UIImage *)applicationIconForBundleID:(NSString *)bundleID {
-
-    if (!bundleID.length) {
-        return nil;
-    }
-
-    /*
-     * iOS private LaunchServices lookup.
-     */
-    Class workspaceClass =
-        NSClassFromString(@"LSApplicationWorkspace");
-
-    if (!workspaceClass) {
-        return nil;
-    }
-
-    id workspace =
-        [workspaceClass
-            performSelector:@selector(defaultWorkspace)];
-
-    if (!workspace) {
-        return nil;
-    }
-
-    id application = nil;
-
-    @try {
-
-        application =
-            [workspace
-                performSelector:
-                    @selector(applicationForBundleIdentifier:)
-                withObject:bundleID];
-
-    } @catch (__unused id exception) {
-
-        application = nil;
-    }
-
-    if (!application) {
-        return nil;
-    }
-
-    NSString *iconPath = nil;
-
-    @try {
-
-        iconPath =
-            [application valueForKey:@"_iconPath"];
-
-    } @catch (__unused id exception) {
-
-        iconPath = nil;
-    }
-
-    if (!iconPath.length) {
-        return nil;
-    }
-
-    return [UIImage imageWithContentsOfFile:iconPath];
-}
-
-@end
-
-#pragma mark - Helpers
-
-static void DINLog(NSString *format, ...) {
-    va_list args;
-    va_start(args, format);
-    NSString *text =
-        [[NSString alloc] initWithFormat:format
-                              arguments:args];
-    va_end(args);
-
-    NSString *path = @"/tmp/DIN_debug.log";
-
-    NSDateFormatter *fmt = [[NSDateFormatter alloc] init];
-    [fmt setDateFormat:@"HH:mm:ss"];
-    NSString *timestamp =
-        [fmt stringFromDate:[NSDate date]];
-
-    NSString *line =
-        [NSString stringWithFormat:@"%@ %@\n",
-            timestamp, text];
-
-    NSFileHandle *fh =
-        [NSFileHandle fileHandleForWritingAtPath:path];
-
-    if (!fh) {
-        [[NSFileManager defaultManager]
-            createFileAtPath:path
-                    contents:nil
-                  attributes:nil];
-        fh = [NSFileHandle
-            fileHandleForWritingAtPath:path];
-    }
-
-    if (fh) {
-        [fh seekToEndOfFile];
-        [fh writeData:
-            [line dataUsingEncoding:NSUTF8StringEncoding]];
-        [fh closeFile];
-    }
-}
-
-static void DINDumpObject(id obj, NSString *label) {
-    if (!obj) {
-        DINLog(@"[DUMP] %@ = nil", label);
-        return;
-    }
-
-    DINLog(@"[DUMP] %@ class=%@", label,
-        NSStringFromClass([obj class]));
-    DINLog(@"[DUMP] %@ description=%@", label, obj);
-
-    unsigned int count = 0;
-    objc_property_t *props =
-        class_copyPropertyList([obj class], &count);
-
-    if (count > 0) {
-        DINLog(@"[DUMP] %@ has %u properties:",
-            label, count);
-        for (unsigned int i = 0; i < count; i++) {
-            const char *name =
-                property_getName(props[i]);
-            NSString *key =
-                [NSString stringWithUTF8String:name];
-            @try {
-                id value = [obj valueForKey:key];
-                NSString *valStr =
-                    [value isKindOfClass:NSString.class]
-                        ? value
-                        : [value description];
-                if ([valStr length] > 200) {
-                    valStr =
-                        [[valStr substringToIndex:200]
-                            stringByAppendingString:@"..."];
-                }
-                DINLog(@"[DUMP]   %@.%@ = %@",
-                    label, key, valStr);
-            } @catch (__unused id exception) {
-                DINLog(@"[DUMP]   %@.%@ = <exception>",
-                    label, key);
-            }
-        }
-        free(props);
-    }
-
-    unsigned int methodCount = 0;
-    Method *methods =
-        class_copyMethodList([obj class], &methodCount);
-    if (methodCount > 0) {
-        DINLog(@"[DUMP] %@ has %u methods (first 30):",
-            label, methodCount);
-        unsigned int limit =
-            methodCount > 30 ? 30 : methodCount;
-        for (unsigned int i = 0; i < limit; i++) {
-            SEL sel = method_getName(methods[i]);
-            const char *name = sel_getName(sel);
-            DINLog(@"[DUMP]   -[%@ %s]",
-                label, name);
-        }
-        free(methods);
-    }
-}
-
-static NSString *DINGetString(id object,
-                               NSArray *keys) {
-
-    if (!object) {
-        return @"";
-    }
-
-    for (NSString *key in keys) {
-
-        @try {
-
-            id value =
-                [object valueForKey:key];
-
-            if ([value isKindOfClass:NSString.class] &&
-                [value length] > 0) {
-
-                return value;
-            }
-
-        } @catch (__unused id exception) {
-        }
-    }
-
-    return @"";
-}
-
-static DINNotificationItem *
-DINCreateItemFromRequest(id request) {
-
-    if (!request) {
-        return nil;
-    }
-
-    DINLog(@"[DIN] parse: request class=%@",
-        NSStringFromClass([request class]));
-    DINLog(@"[DIN] parse: request=%@", request);
-
-    DINNotificationItem *item =
-        [[DINNotificationItem alloc] init];
-
-    item.requestID =
-        DINGetString(
-            request,
-            @[
-                @"requestIdentifier",
-                @"identifier",
-                @"_requestIdentifier"
-            ]);
-
-    id notification = nil;
-
-    @try {
-
-        notification =
-            [request valueForKey:@"notification"];
-
-    } @catch (__unused id exception) {
-    }
-
-    if (!notification) {
-
-        @try {
-
-            notification =
-                [request valueForKey:@"_notification"];
-
-        } @catch (__unused id exception) {
-        }
-    }
-
-    /*
-     * iOS 17: try publisherBulletin path.
-     */
-    id bulletin = nil;
-
-    if (!notification) {
-
-        @try {
-
-            bulletin =
-                [request valueForKey:@"publisherBulletin"];
-
-        } @catch (__unused id exception) {
-        }
-
-        if (bulletin) {
-
-            DINLog(@"[DIN] parse: publisherBulletin class=%@",
-                NSStringFromClass([bulletin class]));
-
-            @try {
-
-                notification =
-                    [bulletin valueForKey:@"notification"];
-
-            } @catch (__unused id exception) {
-            }
-
-            if (!notification) {
-
-                @try {
-
-                    notification =
-                        [bulletin valueForKey:@"_notification"];
-
-                } @catch (__unused id exception) {
-                }
-            }
-        }
-    }
-
-    DINLog(@"[DIN] parse: notification=%@",
-        notification ? NSStringFromClass([notification class]) : @"nil");
-
-    UNNotificationContent *content = nil;
-
-    if ([notification
-            isKindOfClass:UNNotification.class]) {
-
-        content =
-            ((UNNotification *)notification)
-                .request.content;
-
-    } else if ([notification
-                   isKindOfClass:
-                       UNNotificationRequest.class]) {
-
-        content =
-            ((UNNotificationRequest *)notification)
-                .content;
-    }
-
-    if (!content && bulletin) {
-
-        @try {
-
-            content =
-                [bulletin valueForKey:@"content"];
-
-        } @catch (__unused id exception) {
-        }
-    }
-
-    DINLog(@"[DIN] parse: content=%@",
-        content ? NSStringFromClass([content class]) : @"nil");
-
-    if (content) {
-
-        item.title =
-            content.title ?: @"";
-
-        item.body =
-            content.body ?: @"";
-
-        DINLog(@"[DIN] parse: from content title=%@ body=%@",
-            item.title, item.body);
-
-        /*
-         * iOS 17+: prefer sourceBundleIdentifier from request,
-         * since userInfo rarely contains bundleID.
-         */
-        NSString *bundleID =
-            DINGetString(
-                request,
-                @[
-                    @"sourceBundleIdentifier",
-                    @"sectionIdentifier"
-                ]);
-
-        if (!bundleID.length && bulletin) {
-
-            bundleID =
-                DINGetString(
-                    bulletin,
-                    @[
-                        @"sectionID",
-                        @"sectionIdentifier",
-                        @"bundleID"
-                    ]);
-        }
-
-        if (!bundleID.length) {
-
-            NSDictionary *userInfo =
-                content.userInfo;
-
-            bundleID = userInfo[@"bundleID"];
-
-            if (![bundleID isKindOfClass:NSString.class]) {
-
-                bundleID =
-                    userInfo[@"bundleIdentifier"];
-            }
-        }
-
-        item.bundleID =
-            [bundleID isKindOfClass:NSString.class]
-                ? bundleID
-                : @"";
-
-        DINLog(@"[DIN] parse: bundleID=%@", item.bundleID);
-    }
-
-    if (!item.title.length) {
-
-        item.title =
-            DINGetString(
-                request,
-                @[
-                    @"title",
-                    @"alertTitle"
-                ]);
-
-        if (!item.title.length && bulletin) {
-
-            item.title =
-                DINGetString(
-                    bulletin,
-                    @[
-                        @"title",
-                        @"alertTitle",
-                        @"messageTitle"
-                    ]);
-        }
-    }
-
-    if (!item.body.length) {
-
-        item.body =
-            DINGetString(
-                request,
-                @[
-                    @"body",
-                    @"alertBody"
-                ]);
-
-        if (!item.body.length && bulletin) {
-
-            item.body =
-                DINGetString(
-                    bulletin,
-                    @[
-                        @"body",
-                        @"alertBody",
-                        @"message"
-                    ]);
-        }
-    }
-
-    if (!item.bundleID.length) {
-
-        item.bundleID =
-            DINGetString(
-                request,
-                @[
-                    @"bundleIdentifier",
-                    @"bundleID",
-                    @"sourceBundleIdentifier"
-                ]);
-    }
-
-    if (!item.requestID.length) {
-
-        item.requestID =
-            [NSString stringWithFormat:@"%p", request];
-    }
-
-    DINLog(@"[DIN] parse: final title=%@ body=%@ bundleID=%@",
-        item.title, item.body, item.bundleID);
-
-    if (!item.title.length &&
-        !item.body.length) {
-
-        DINLog(@"[DIN] parse: FAILED, returning nil");
-        return nil;
-    }
-
-    DINLog(@"[DIN] parse: SUCCESS");
-    return item;
-}
-
-#pragma mark - SpringBoard Hook
-
-%hook SBBannerController
-
-- (void)presentBannerWithRequest:(id)request {
-
-    DINLog(@"[DIN] Banner Hook fired");
-    DINLog(@"[DIN] request class = %@",
-        NSStringFromClass([request class]));
-    DINLog(@"[DIN] request = %@", request);
-
-    /*
-     * Version A: dump request structure on first trigger.
-     */
-    static BOOL dumped = NO;
-    if (!dumped) {
-        dumped = YES;
-        DINDumpObject(request, @"request");
-    }
-
-    /*
-     * Disabled = completely preserve normal iOS behavior.
-     */
-    if (!DINEnabled()) {
-
-        %orig;
-
-        return;
-    }
-
-    DINNotificationItem *item =
-        DINCreateItemFromRequest(request);
-
-    if (!item) {
-
-        DINLog(@"[DIN] item is nil, calling orig");
-
-        /*
-         * Version A: show hardcoded test notification
-         * to verify UI works independently of parsing.
-         */
-        static BOOL testShown = NO;
-        if (!testShown) {
-            testShown = YES;
-            DINNotificationItem *testItem =
-                [[DINNotificationItem alloc] init];
-            testItem.title = @"测试通知";
-            testItem.body = @"看到这个说明UI正常，问题在解析";
-            testItem.bundleID = @"com.apple.springboard";
-            testItem.requestID = @"hardcoded-test";
-
-            DINLog(@"[DIN] showing hardcoded test");
-
-            dispatch_async(
-                dispatch_get_main_queue(),
-                ^{
-                    [[DINIslandController sharedController]
-                        enqueueNotification:testItem];
-                });
-        }
-
-        %orig;
-
-        return;
-    }
-
-    /*
-     * Send the notification to our Dynamic Island.
-     */
-    dispatch_async(
-        dispatch_get_main_queue(),
-        ^{
-
-            [[DINIslandController sharedController]
-                enqueueNotification:item];
-        });
-
-    /*
-     * Do not call %orig to suppress the default Banner.
-     */
-    return;
-}
-
 %end
 
-#pragma mark - Constructor
-
 %ctor {
-
-    /*
-     * Minimal load marker: if this file exists after
-     * respring, the dylib was definitely loaded.
-     * Written before anything else to avoid early
-     * failures masking the load event.
-     */
-    @try {
-        [@"DynamicIslandNotify loaded\n"
-            writeToFile:@"/tmp/DIN_loaded.txt"
-             atomically:YES
-               encoding:NSUTF8StringEncoding
-                  error:nil];
-    } @catch (__unused id e) {
-    }
-
-    DINLog(@"[DIN] Tweak loaded");
-
-    /*
-     * Only inject into SpringBoard.
-     */
-    NSString *bundleID =
-        [NSBundle mainBundle].bundleIdentifier;
-
-    if (![bundleID
-            isEqualToString:@"com.apple.springboard"]) {
-
-        return;
-    }
-
-    /*
-     * Dump SBBannerController method list to find
-     * the correct notification presentation selector.
-     */
-    Class bannerClass = objc_getClass("SBBannerController");
-
-    if (bannerClass) {
-
-        unsigned int methodCount = 0;
-        Method *methods =
-            class_copyMethodList(bannerClass, &methodCount);
-
-        DINLog(@"[DIN] SBBannerController found: %u methods",
-            methodCount);
-
-        for (unsigned int i = 0; i < methodCount; i++) {
-
-            DINLog(@"[DIN]   -[%@ %@]",
-                NSStringFromClass(bannerClass),
-                NSStringFromSelector(
-                    method_getName(methods[i])));
-        }
-
-        free(methods);
-
-    } else {
-
-        DINLog(@"[DIN] SBBannerController class NOT found");
-    }
-
-    dispatch_async(
-        dispatch_get_main_queue(),
-        ^{
-
-            DINIslandController *controller =
-                [DINIslandController sharedController];
-
-            [controller createWindowIfNeeded];
-        });
+    if (NSClassFromString(@"SBSystemApertureViewController")) DXRegisterProtocols();
 }
